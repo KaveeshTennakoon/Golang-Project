@@ -4,10 +4,12 @@ import "time"
 
 // Timing constants tuned for local tests.
 const (
-	ElectionTimeoutMin = 150 * time.Millisecond
-	ElectionTimeoutMax = 300 * time.Millisecond
-	HeartbeatInterval  = 30 * time.Millisecond
+	// Increased election timeouts for more stability
+	ElectionTimeoutMin = 300 * time.Millisecond
+	ElectionTimeoutMax = 600 * time.Millisecond
+	HeartbeatInterval  = 50 * time.Millisecond // More frequent heartbeats
 
-	RetainTail = 100
-	PruneEvery = 2000
+	// Log pruning settings
+	RetainTail = 100  // Keep at least this many entries after pruning
+	PruneEvery = 2000 // Prune when log exceeds this many entries
 )

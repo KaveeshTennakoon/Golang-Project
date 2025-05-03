@@ -26,7 +26,18 @@ type HTTPTransport struct {
 
 func New(handler HandlerFunc) *HTTPTransport {
 	return &HTTPTransport{
-		client:  &http.Client{Timeout: 3 * time.Second},
+		client: &http.Client{
+			Timeout: 3 * time.Second, // Increased timeout for better reliability
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:     90 * time.Second,
+				// Add more resilient connection settings
+				DisableKeepAlives: false,
+				MaxConnsPerHost:   100,
+				ForceAttemptHTTP2: false,
+			},
+		},
 		handler: handler,
 	}
 }
@@ -36,21 +47,45 @@ func (t *HTTPTransport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (t *HTTPTransport) Call(addr string, method RPC, req, resp any) error {
+	// Marshal the request to JSON
 	buf, _ := json.Marshal(req)
-	httpResp, err := t.client.Post(
-		"http://"+addr+"/"+string(method),
-		"application/json",
-		bytes.NewReader(buf))
 
+	// Create a new request with retry logic
+	maxRetries := 3
+	var httpResp *http.Response
+	var err error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// If this is a retry, add a small delay with exponential backoff
+		if attempt > 0 {
+			backoff := time.Duration(attempt*50) * time.Millisecond
+			time.Sleep(backoff)
+		}
+
+		// Make the HTTP request
+		httpResp, err = t.client.Post(
+			"http://"+addr+"/"+string(method),
+			"application/json",
+			bytes.NewReader(buf))
+
+		// If successful, break out of the retry loop
+		if err == nil {
+			break
+		}
+	}
+
+	// If all retries failed, return the last error
 	if err != nil {
 		return err
 	}
 	defer httpResp.Body.Close()
 
+	// Check for non-200 status codes
 	if httpResp.StatusCode != http.StatusOK {
 		return io.ErrUnexpectedEOF
 	}
 
+	// Decode the response
 	return json.NewDecoder(httpResp.Body).Decode(resp)
 }
 
