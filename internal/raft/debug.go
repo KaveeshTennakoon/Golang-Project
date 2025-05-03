@@ -7,9 +7,9 @@ import (
 
 // DebugLog prints debug information to stderr.
 // Set debugEnabled to true to enable debug logging.
-var debugEnabled = false
+var debugEnabled = true
 
-func DebugLog(format string, args ...interface{}) {
+func DebugLog(format string, args ...any) {
 	if debugEnabled {
 		fmt.Fprintf(os.Stderr, format+"\n", args...)
 	}

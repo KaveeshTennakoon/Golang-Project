@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -48,25 +49,30 @@ func (t *HTTPTransport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (t *HTTPTransport) Call(addr string, method RPC, req, resp any) error {
 	// Marshal the request to JSON
-	buf, _ := json.Marshal(req)
+	buf, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
 
 	// Create a new request with retry logic
-	maxRetries := 3
+	maxRetries := 5 // Increase retries
 	var httpResp *http.Response
-	var err error
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := range maxRetries {
 		// If this is a retry, add a small delay with exponential backoff
 		if attempt > 0 {
-			backoff := time.Duration(attempt*50) * time.Millisecond
+			backoff := time.Duration(attempt*100) * time.Millisecond
 			time.Sleep(backoff)
 		}
 
+		// Create a new reader for each attempt to avoid "http: ContentLength=... with Body length 0"
+		bodyReader := bytes.NewReader(buf)
+
 		// Make the HTTP request
 		httpResp, err = t.client.Post(
-			"http://"+addr+"/"+string(method),
+			"http://"+addr+"/raft/"+string(method),
 			"application/json",
-			bytes.NewReader(buf))
+			bodyReader)
 
 		// If successful, break out of the retry loop
 		if err == nil {
@@ -78,15 +84,23 @@ func (t *HTTPTransport) Call(addr string, method RPC, req, resp any) error {
 	if err != nil {
 		return err
 	}
+
+	// Ensure body is closed
 	defer httpResp.Body.Close()
 
 	// Check for non-200 status codes
 	if httpResp.StatusCode != http.StatusOK {
-		return io.ErrUnexpectedEOF
+		// Read the body to get more information about the error
+		body, _ := io.ReadAll(httpResp.Body)
+		return fmt.Errorf("HTTP error: %d - %s", httpResp.StatusCode, string(body))
 	}
 
 	// Decode the response
-	return json.NewDecoder(httpResp.Body).Decode(resp)
+	if err := json.NewDecoder(httpResp.Body).Decode(resp); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return nil
 }
 
 // Utility to reply JSON.

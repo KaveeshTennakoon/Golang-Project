@@ -18,7 +18,7 @@ import (
 
 func pickNPorts(n int) ([]int, error) {
 	ports := make([]int, 0, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		ln, err := net.Listen("tcp", ":0")
 		if err != nil {
 			return nil, err
@@ -41,7 +41,7 @@ func buildCluster(t *testing.T, n int) ([]*raft.Node, func()) {
 
 	// pick free ports
 	addrs := make(map[string]string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		addrs[fmt.Sprintf("node%d", i+1)] = fmt.Sprintf("localhost:%d", ports[i])
 	}
 
@@ -76,12 +76,29 @@ func buildCluster(t *testing.T, n int) ([]*raft.Node, func()) {
 		}(applyCh)
 
 		// start HTTP listener ----------------------------------------
-		go func(n *raft.Node, addr string) {
-			n.Start()
-			mux := http.NewServeMux()
-			mux.Handle("/raft/", http.StripPrefix("/raft", node.Trans()))
-			log.Fatal(http.ListenAndServe(addr, mux))
-		}(node, addr)
+		mux := http.NewServeMux()
+		mux.Handle("/raft/", http.StripPrefix("/raft", node.Trans()))
+
+		server := &http.Server{
+			Addr:              addr,
+			Handler:           mux,
+			ReadTimeout:       5 * time.Second,
+			WriteTimeout:      5 * time.Second,
+			ReadHeaderTimeout: 2 * time.Second,
+		}
+
+		// Start the HTTP server in a separate goroutine
+		go func(s *http.Server) {
+			if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("HTTP server error: %v", err)
+			}
+		}(server)
+
+		// Start the Raft node in a separate goroutine
+		go node.Start()
+
+		// Wait a short time to ensure the server is up
+		time.Sleep(100 * time.Millisecond)
 
 		nodes = append(nodes, node)
 	}
@@ -165,7 +182,7 @@ func TestConcurrentWrites(t *testing.T) {
 	entry_count := 1000
 
 	var wg sync.WaitGroup
-	for i := 0; i < entry_count; i++ {
+	for i := range entry_count {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
